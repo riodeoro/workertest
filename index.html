@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="coi-serviceworker.js"></script>
+<title>WX Data Explorer</title>
+<link rel="icon" href="station.png">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<nav id="wx-nav">
+  <span class="brand">
+    <span>WX Data Explorer</span>
+  </span>
+</nav>
+
+<div class="controls-wrap">
+  <div class="wx-controls-row">
+    <div class="wx-control fc">
+      <label for="tr-fc-select">Fire Centre</label>
+      <div id="tr-fc-select"></div>
+    </div>
+    <div class="wx-control yr">
+      <label for="tr-year-select">Years</label>
+      <div id="tr-year-select"></div>
+    </div>
+    <div class="wx-control load">
+      <span id="tr-spin-load" class="tr-spin"></span>
+    </div>
+  </div>
+  <div id="tr-load-status"></div>
+</div>
+
+<div class="main-content">
+
+  <div class="wx-card">
+    <span id="tr-spin-parcoords" class="tr-spin"></span>
+    <div class="tr-card-controls">
+      <div class="wx-control">
+        <label for="tr-x-station">Stations</label>
+        <div id="tr-x-station"></div>
+      </div>
+      <div class="wx-control">
+        <label for="tr-x-dims">Attributes</label>
+        <div id="tr-x-dims"></div>
+      </div>
+      <div class="wx-control">
+        <label for="tr-x-colorby">Colour by</label>
+        <div id="tr-x-colorby"></div>
+      </div>
+    </div>
+    <div id="tr-x-parcoords"></div>
+  </div>
+
+  <div class="tr-filter-row">
+    <div id="tr-x-filter-bar" class="tr-chips"></div>
+    <button type="button" id="tr-x-btn-clear">Clear filters</button>
+  </div>
+
+  <div class="wx-chart-row">
+
+    <div class="wx-card">
+      <span id="tr-spin-scatter" class="tr-spin"></span>
+      <div class="tr-card-controls">
+        <div class="wx-control">
+          <label for="tr-x-scatter-x">X attribute</label>
+          <div id="tr-x-scatter-x"></div>
+        </div>
+        <div class="wx-control">
+          <label for="tr-x-scatter-y">Y attribute</label>
+          <div id="tr-x-scatter-y"></div>
+        </div>
+      </div>
+      <div id="tr-x-scatter"></div>
+    </div>
+
+    <div class="wx-card">
+      <span id="tr-spin-table" class="tr-spin"></span>
+      <div class="tr-table-wrap">
+        <table id="tr-x-table" class="tr-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="tr-x-pager" class="tr-pager"></div>
+    </div>
+
+  </div>
+</div>
+
+<span id="tr-timing-diag" hidden></span>
+<div id="tr-detail-chart-container"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
