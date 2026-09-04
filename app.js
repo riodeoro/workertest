@@ -26,6 +26,7 @@ import {
   previewSample,
   xLabel,
   dispUnit,
+  INTEGER_COLS,
 } from "./data.js";
 import { dropCache, ready, fatal } from "./duck.js";
 import { emptyFig, buildDensity, buildParcoords, buildStationDetail } from "./charts.js";
@@ -331,6 +332,54 @@ function filteredCols(clauses) {
   return out;
 }
 
+const OPEN_BOUND = 1e12;
+const TYPED_SRC = "typed";
+
+const _axisExtent = new Map();
+
+function noteExtents(map) {
+  if (!map) return;
+  for (const k of Object.keys(map)) {
+    const e = map[k];
+    if (Array.isArray(e) && Number.isFinite(e[0]) && Number.isFinite(e[1]))
+      _axisExtent.set(k, [e[0], e[1]]);
+  }
+}
+
+function fmtBound(col, v, plain) {
+  if (!Number.isFinite(v)) return "";
+  if (INTEGER_COLS.has(col)) return String(Math.round(v));
+  if (plain) {
+    const r = Math.abs(v) >= 1000 ? Number(v).toFixed(1) : Number(v).toFixed(3);
+    return String(Number(r));
+  }
+  return Number(v).toLocaleString("en-US", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+}
+
+function rangeText(col, lo, hi, plain) {
+  const openLo = lo <= -OPEN_BOUND;
+  const openHi = hi >= OPEN_BOUND;
+  const ge = plain ? ">=" : "\u2265";
+  const le = plain ? "<=" : "\u2264";
+  const one = (v) =>
+    col === "DATE_TIME_PARSED" ? fmtDate(v * 1000) : fmtBound(col, v, plain);
+  if (openLo && openHi) return "any";
+  if (openLo) return `${le} ${one(hi)}`;
+  if (openHi) return `${ge} ${one(lo)}`;
+  const a = one(lo);
+  const b = one(hi);
+  return a === b ? a : `${a} to ${b}`;
+}
+
+function rangesText(col, ranges, plain) {
+  return (ranges || [])
+    .map(([lo, hi]) => rangeText(col, lo, hi, plain))
+    .join(", ");
+}
+
 function clauseLabel(clause) {
   const col = clause.col;
   const names = clause.names;
@@ -340,34 +389,302 @@ function clauseLabel(clause) {
     if (list.length > 3) shown += ` +${list.length - 3} more`;
     return list.length ? `Station: ${shown}` : "Station: none";
   }
-  const ranges = clause.ranges || [];
-  let parts;
-  if (col === "DATE_TIME_PARSED")
-    parts = ranges.map(
-      ([lo, hi]) => `${fmtDate(lo * 1000)} to ${fmtDate(hi * 1000)}`
-    );
-  else
-    parts = ranges.map(
-      ([lo, hi]) =>
-        `${Number(lo).toLocaleString("en-US", {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-        })} to ${Number(hi).toLocaleString("en-US", {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1,
-        })}`
-    );
-  return `${xLabel(col)}: ${parts.join(", ")}`;
+  return `${xLabel(col)}: ${rangesText(col, clause.ranges, false)}`;
 }
 
-const SELECTION_SRC = new Set(["zoom", "select", "brush"]);
+const SELECTION_SRC = new Set(["zoom", "select", "brush", TYPED_SRC]);
+
+const RANGE_RE =
+  /^\s*([+-]?\d*\.?\d+)\s*(?:to|through|\.\.|\u2026|\u2013|\u2014|-|:)\s*([+-]?\d*\.?\d+)\s*$/i;
+const ONE_RE =
+  /^\s*(>=|=>|<=|=<|>|<|=|\u2265|\u2264)?\s*([+-]?\d*\.?\d+)\s*$/;
+const DATE_TOK = /\d{4}(?:-\d{1,2}(?:-\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?)?)?/g;
+
+function clampRange(col, lo, hi) {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi < lo) return null;
+  const ext = _axisExtent.get(col);
+  if (ext) {
+    const nlo = Math.max(lo, ext[0]);
+    const nhi = Math.min(hi, ext[1]);
+    if (nhi >= nlo) return [nlo, nhi];
+  }
+  return [Math.max(lo, -OPEN_BOUND), Math.min(hi, OPEN_BOUND)];
+}
+
+function parseNumRange(col, tok) {
+  const m = RANGE_RE.exec(tok);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    return clampRange(col, Math.min(a, b), Math.max(a, b));
+  }
+  const s = ONE_RE.exec(tok);
+  if (!s) return null;
+  const op = s[1] || "";
+  const v = Number(s[2]);
+  if (!Number.isFinite(v)) return null;
+  if (op === ">" || op === ">=" || op === "=>" || op === "\u2265")
+    return clampRange(col, v, OPEN_BOUND);
+  if (op === "<" || op === "<=" || op === "=<" || op === "\u2264")
+    return clampRange(col, -OPEN_BOUND, v);
+  if (INTEGER_COLS.has(col)) return clampRange(col, v, v);
+  const dec = (/\.(\d+)$/.exec(s[2]) || [null, ""])[1].length;
+  const half = 0.5 * Math.pow(10, -dec);
+  return clampRange(col, v - half, v + half);
+}
+
+function dateSpan(text) {
+  const m =
+    /^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?)?)?$/.exec(
+      text
+    );
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = m[2] ? Number(m[2]) : null;
+  const d = m[3] ? Number(m[3]) : null;
+  const hh = m[4] ? Number(m[4]) : null;
+  const mi = m[5] ? Number(m[5]) : 0;
+  const ss = m[6] ? Number(m[6]) : 0;
+  const start = Date.UTC(y, (mo || 1) - 1, d || 1, hh || 0, mi, ss);
+  let end;
+  if (hh !== null) end = start + (m[6] ? 1000 : 60000);
+  else if (d !== null) end = Date.UTC(y, mo - 1, d + 1);
+  else if (mo !== null) end = Date.UTC(y, mo, 1);
+  else end = Date.UTC(y + 1, 0, 1);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return [start / 1000, end / 1000 - 1];
+}
+
+function parseDateRange(tok) {
+  const found = tok.match(DATE_TOK);
+  if (!found || !found.length) return null;
+  const a = dateSpan(found[0]);
+  if (!a) return null;
+  if (found.length >= 2) {
+    const b = dateSpan(found[1]);
+    if (!b) return null;
+    return clampRange(
+      "DATE_TIME_PARSED",
+      Math.min(a[0], b[0]),
+      Math.max(a[1], b[1])
+    );
+  }
+  const op = /^(>=|=>|<=|=<|>|<|\u2265|\u2264)/.exec(tok.replace(/\s+/g, ""));
+  if (op) {
+    const o = op[1];
+    if (o === ">" || o === ">=" || o === "=>" || o === "\u2265")
+      return clampRange("DATE_TIME_PARSED", a[0], OPEN_BOUND);
+    return clampRange("DATE_TIME_PARSED", -OPEN_BOUND, a[1]);
+  }
+  return clampRange("DATE_TIME_PARSED", a[0], a[1]);
+}
+
+function parseRanges(col, text) {
+  const toks = String(text)
+    .split(/[,;]/)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (!toks.length) return null;
+  const out = [];
+  for (const t of toks) {
+    const r =
+      col === "DATE_TIME_PARSED" ? parseDateRange(t) : parseNumRange(col, t);
+    if (!r) return null;
+    out.push(r);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const [lo, hi] of out) {
+    const last = merged[merged.length - 1];
+    if (last && lo <= last[1]) last[1] = Math.max(last[1], hi);
+    else merged.push([lo, hi]);
+  }
+  return merged.length ? merged : null;
+}
 
 function chipKey(c) {
   return `${c.src}|${c.col}`;
 }
 
+const MAIN_CHIPS = "tr-x-filter-bar";
+
+let _edit = null;
+
+function editable(c) {
+  return !!(c && c.col && c.col !== "STATION_NAME" && c.names == null);
+}
+
+function typeableCols() {
+  const out = [];
+  for (const c of ["DATE_TIME_PARSED"].concat(state.liveCols || []))
+    if (c && !out.includes(c)) out.push(c);
+  return out;
+}
+
+function typeHint(col) {
+  if (col === "DATE_TIME_PARSED") return "2024-06-01 to 2024-08-31";
+  if (INTEGER_COLS.has(col)) return "12, 6-18, >=12";
+  return "10-25, >30, 12.5";
+}
+
+const TYPE_HELP =
+  "Type a value (12), a range (10-25 or 10 to 25), an open bound " +
+  "(>30, <=5), or several separated by commas. Enter applies, Esc cancels.";
+
+function endEdit(silent) {
+  if (!_edit) return;
+  const host = _edit.target;
+  _edit = null;
+  if (!silent) renderChips(host, _preview || state.where, true);
+}
+
+function applyTyped(col, ranges) {
+  clearBrushPreview();
+  state.where = withClause(state.where, TYPED_SRC, col, ranges, null);
+  state.axisStale.delete(col);
+  state.page = 0;
+  renderAll();
+}
+
+function dropTyped(col) {
+  clearBrushPreview();
+  state.where = dropSelection(state.where, col);
+  state.axisStale.delete(col);
+  state.page = 0;
+  renderAll();
+}
+
+function buildEditor(col, initial, pick) {
+  const chip = document.createElement("span");
+  chip.className = "tr-chip editing";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "tr-chip-input";
+  input.value = initial || "";
+  input.placeholder = typeHint(col);
+  input.title = TYPE_HELP;
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  let getCol = () => col;
+  if (pick) {
+    const sel = document.createElement("select");
+    sel.className = "tr-chip-col";
+    sel.title = "Attribute to filter";
+    for (const c of typeableCols()) {
+      const o = document.createElement("option");
+      o.value = c;
+      o.textContent = xLabel(c);
+      sel.appendChild(o);
+    }
+    sel.value = col;
+    getCol = () => sel.value;
+    sel.addEventListener("change", () => {
+      input.placeholder = typeHint(sel.value);
+      input.classList.remove("bad");
+      input.focus();
+    });
+    chip.appendChild(sel);
+  } else {
+    const lab = document.createElement("span");
+    lab.className = "tr-chip-col";
+    lab.textContent = `${xLabel(col)}:`;
+    chip.appendChild(lab);
+  }
+  chip.appendChild(input);
+
+  let done = false;
+  const cancel = () => {
+    if (done) return;
+    done = true;
+    endEdit();
+  };
+  const commit = (soft) => {
+    if (done) return;
+    const c = getCol();
+    const raw = input.value.trim();
+    if (!pick && raw === (initial || "")) return cancel();
+    if (!raw) {
+      done = true;
+      _edit = null;
+      if (pick) endEdit();
+      else dropTyped(c);
+      return;
+    }
+    const ranges = parseRanges(c, raw);
+    if (!ranges) {
+      if (soft) return cancel();
+      input.classList.add("bad");
+      input.focus();
+      input.select();
+      return;
+    }
+    done = true;
+    _edit = null;
+    applyTyped(c, ranges);
+  };
+  input.addEventListener("input", () => input.classList.remove("bad"));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commit(false);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
+    }
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (done || chip.contains(document.activeElement)) return;
+      commit(true);
+    }, 0);
+  });
+  return chip;
+}
+
+function startEdit(target, clause) {
+  if (_edit) endEdit();
+  const live =
+    (_preview || state.where).find(
+      (x) => x.src === clause.src && x.col === clause.col
+    ) || clause;
+  const chip = buildEditor(
+    live.col,
+    rangesText(live.col, live.ranges, true),
+    false
+  );
+  const node = Array.from(target.children).find(
+    (n) => n.dataset.key === chipKey(live)
+  );
+  if (node) target.replaceChild(chip, node);
+  else target.appendChild(chip);
+  _edit = { target };
+  const input = chip.querySelector("input");
+  input.focus();
+  input.select();
+}
+
+function startNewFilter() {
+  const target = el(MAIN_CHIPS);
+  if (!target || !state.loaded) return;
+  if (_edit) endEdit();
+  const cols = typeableCols();
+  if (!cols.length) return;
+  const col = cols.includes(state.xcol) ? state.xcol : cols[0];
+  const chip = buildEditor(col, "", true);
+  target.appendChild(chip);
+  _edit = { target };
+  chip.querySelector("input").focus();
+}
+
 function renderChips(target, clauses, removable) {
   const list = clauses || [];
+  if (target.id === MAIN_CHIPS) {
+    const clear = el("tr-x-btn-clear");
+    if (clear) clear.disabled = !list.length;
+    const add = el("tr-x-btn-add");
+    if (add) add.disabled = !state.loaded;
+  }
+  if (_edit && _edit.target === target) return;
   const nodes = Array.from(target.children);
   const aligned =
     nodes.length === list.length &&
@@ -378,7 +695,7 @@ function renderChips(target, clauses, removable) {
       const span = nodes[i].firstChild;
       if (span && span.textContent !== lab) {
         span.textContent = lab;
-        const b = nodes[i].querySelector("button");
+        const b = nodes[i].querySelector(".tr-chip-x");
         if (b) b.title = `Remove filter: ${lab}`;
       }
     });
@@ -389,12 +706,20 @@ function renderChips(target, clauses, removable) {
     const span = document.createElement("span");
     span.className = "tr-chip";
     span.dataset.key = chipKey(c);
-    const lab = document.createElement("span");
+    const canEdit = removable && editable(c);
+    const lab = document.createElement(canEdit ? "button" : "span");
     lab.textContent = clauseLabel(c);
+    if (canEdit) {
+      lab.type = "button";
+      lab.className = "tr-chip-edit";
+      lab.title = `Click to type a value or range. ${TYPE_HELP}`;
+      lab.addEventListener("click", () => startEdit(target, c));
+    }
     span.appendChild(lab);
     if (removable) {
       const b = document.createElement("button");
       b.type = "button";
+      b.className = "tr-chip-x";
       b.textContent = "\u00d7";
       b.title = `Remove filter: ${clauseLabel(c)}`;
       b.addEventListener("click", () => {
@@ -705,6 +1030,7 @@ async function renderParcoords(token) {
       )
     );
     if (token !== state.pcToken) return;
+    if (sample) noteExtents(sample.extents);
     const shown = sample
       ? state.dims.filter((d) => sample.data[d])
       : [];
@@ -762,6 +1088,12 @@ async function renderDensity(token) {
     );
     if (token !== state.token) return;
     _densityRes = res;
+    if (res) {
+      const ext = {};
+      if (state.xcol) ext[state.xcol] = [res.x0, res.x0 + res.xs * res.nx];
+      if (state.ycol) ext[state.ycol] = [res.y0, res.y0 + res.ys * res.ny];
+      noteExtents(ext);
+    }
     _densityTotal = 0;
     if (res && res.n) for (let i = 0; i < res.n.length; i++) _densityTotal += res.n[i];
     const fig = buildDensity(res, state.xcol, state.ycol, densitySelection());
@@ -1847,6 +2179,8 @@ async function doLoad(seq) {
   _densityTotal = 0;
   _previewSample = null;
   _previewKey = null;
+  _axisExtent.clear();
+  endEdit(true);
   _detailCache.clear();
   dropCache();
   if (!fc) {
@@ -2110,7 +2444,12 @@ async function boot() {
     },
   });
 
+  el("tr-x-btn-add").disabled = true;
+  el("tr-x-btn-add").addEventListener("click", () => startNewFilter());
+
+  el("tr-x-btn-clear").disabled = true;
   el("tr-x-btn-clear").addEventListener("click", () => {
+    endEdit(true);
     if (!state.where.length) return;
     state.where = [];
     forgetStaleAxes();
