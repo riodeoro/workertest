@@ -314,12 +314,12 @@ input:focus, button:focus-visible {
   min-height: 28px;
   margin-bottom: 10px;
 }
+.tr-filter-row:has(.tr-chips:empty) { visibility: hidden; }
 .tr-filter-row > button {
   flex: 0 0 auto;
   order: 2;
   padding: 5px 12px;
 }
-.tr-filter-row > button + button { margin-left: 6px; }
 
 .tr-chips {
   display: flex;
@@ -374,64 +374,33 @@ input:focus, button:focus-visible {
 }
 .tr-chip:not(:has(.tr-chip-x)) { padding-right: 10px; }
 
-.tr-chip .tr-chip-edit {
+button.tr-chip-num {
   all: unset;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: inherit;
-  color: inherit;
   cursor: text;
-  border-bottom: 1px dashed transparent;
+  border-bottom: 1px dashed var(--line-strong);
 }
-.tr-chip .tr-chip-edit:hover { border-bottom-color: var(--line-strong); }
-.tr-chip .tr-chip-edit:focus-visible {
+button.tr-chip-num:hover { background: var(--hover-firm); }
+button.tr-chip-num:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.35);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-.tr-chip.editing {
-  gap: 6px;
-  padding: 2px 8px;
-  border-color: var(--line-strong);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-}
-.tr-chip.editing:has(input.tr-chip-input.bad) { border-color: #fca5a5; }
-
-.tr-chip .tr-chip-col {
-  flex: 0 0 auto;
+input.tr-chip-num {
+  font-family: inherit;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-select.tr-chip-col {
-  font-family: inherit;
-  max-width: 140px;
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-input.tr-chip-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 160px;
-  font-family: inherit;
-  font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  background: transparent;
+  background: var(--surface);
   border: none;
+  border-bottom: 1px solid var(--accent);
   border-radius: 0;
-  padding: 3px 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  text-align: center;
 }
-input.tr-chip-input:focus { outline: none; }
-input.tr-chip-input::placeholder { color: var(--text-muted); font-weight: 400; }
-input.tr-chip-input.bad { color: #b91c1c; }
+input.tr-chip-num:focus { outline: none; }
+input.tr-chip-num.bad { color: #b91c1c; border-bottom-color: #b91c1c; }
 
 .tr-spin {
   width: 14px;
@@ -616,13 +585,11 @@ input.tr-chip-input.bad { color: #b91c1c; }
     min-height: 44px;
     margin-top: 10px;
   }
-  .tr-filter-row > button + button { margin-left: 0; }
   .tr-chips { justify-content: flex-start; }
   .tr-chip { padding: 5px 5px 5px 11px; }
   .tr-chip .tr-chip-x { width: 22px; height: 22px; }
   .tr-chip:not(:has(.tr-chip-x)) { padding-right: 11px; }
-  .tr-chip.editing { width: 100%; box-sizing: border-box; padding: 4px 10px; }
-  input.tr-chip-input { font-size: 16px; width: auto; }
+  input.tr-chip-num { font-size: 16px; }
 
   .dd-control { min-height: 44px; }
   .dd-search { font-size: 16px; padding: 8px 6px; }
